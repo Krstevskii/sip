@@ -1,0 +1,15 @@
+spring:
+  application:
+    name: sip
+
+sip:
+  server:
+    address: 127.0.0.1
+    port: 5060
+    transport: TCP
+  client:
+    username: ikrstevs
+    password: "#supersecret#"
+    address: 127.0.0.1
+    port: 5000
+    transport: TCP
