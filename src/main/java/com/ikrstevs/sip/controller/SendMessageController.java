@@ -2,10 +2,7 @@ package com.ikrstevs.sip.controller;
 
 import com.ikrstevs.sip.service.wrapper.SipMessageSenderTcp;
 import lombok.RequiredArgsConstructor;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestMapping;
-import org.springframework.web.bind.annotation.RestController;
+import org.springframework.web.bind.annotation.*;
 
 import javax.sip.InvalidArgumentException;
 import javax.sip.SipException;
@@ -24,7 +21,8 @@ public class SendMessageController {
     }
 
     @GetMapping(value = "/invite")
-    public void invite() throws InvalidArgumentException, ParseException, SipException {
+    public void invite(@RequestParam(name = "username") final String username) throws InvalidArgumentException, ParseException, SipException {
+        sipMessageSender.sendInvite(username);
     }
 
     @PostMapping(value = "/accept")

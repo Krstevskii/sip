@@ -10,6 +10,7 @@ import org.springframework.validation.annotation.Validated;
 
 import javax.sip.*;
 import javax.sip.address.AddressFactory;
+import javax.sip.header.CSeqHeader;
 import javax.sip.header.HeaderFactory;
 import javax.sip.message.MessageFactory;
 import javax.sip.message.Request;
@@ -17,6 +18,8 @@ import javax.sip.message.Response;
 import java.text.ParseException;
 import java.util.List;
 import java.util.TooManyListenersException;
+
+import static com.ikrstevs.sip.util.ConnectionUtil.*;
 
 @Service
 @Validated
@@ -27,6 +30,7 @@ public class SipMessageSenderTcp extends SipMessageSender {
     private final SipProvider sipProvider;
     private final HeaderFactory headerFactory;
     private final MessageFactory messageFactory;
+    private final AddressFactory addressFactory;
 
     protected SipMessageSenderTcp(@NotNull final SipFactoryWrapper sipFactoryWrapper,
                                   @NotNull final SipClientConfiguration sipClientConfiguration,
@@ -42,7 +46,18 @@ public class SipMessageSenderTcp extends SipMessageSender {
         this.sipClientConfiguration = sipClientConfiguration;
         this.headerFactory = sipFactoryWrapper.getHeaderFactory();
         this.messageFactory = sipFactoryWrapper.getMessageFactory();
+        this.addressFactory = sipFactoryWrapper.getAddressFactory();
+        sendRegister();
+    }
+
+    private void sendRegister() throws SipException, InvalidArgumentException, ParseException {
         ClientTransaction transaction = this.sipProvider.getNewClientTransaction(register());
+        transaction.sendRequest();
+    }
+
+    public void sendInvite(String username) throws InvalidArgumentException, ParseException, SipException {
+        var invite = invite(username);
+        ClientTransaction transaction = this.sipProvider.getNewClientTransaction(invite);
         transaction.sendRequest();
     }
 
@@ -54,6 +69,10 @@ public class SipMessageSenderTcp extends SipMessageSender {
         if (method.equals("OPTIONS")) {
             processOptionsRequest(serverTransaction, requestEvent.getRequest());
         }
+
+        if (method.equals("BYE")) {
+            processByeRequest(requestEvent.getDialog());
+        }
     }
 
     @Override
@@ -62,6 +81,17 @@ public class SipMessageSenderTcp extends SipMessageSender {
         if (response.getStatusCode() == Response.UNAUTHORIZED) {
             // handle unauthorized
         }
+
+        if (isInviteAccepted(response)) {
+            processInviteAccepted(responseEvent, response);
+        }
+    }
+
+    private static boolean isInviteAccepted(Response response) {
+        final var statusCode = response.getStatusCode();
+
+        var cSeqHeader = (CSeqHeader) response.getHeader("CSeq");
+        return cSeqHeader.getMethod().equals("INVITE") && statusCode == Response.OK;
     }
 
     @Override
@@ -83,14 +113,40 @@ public class SipMessageSenderTcp extends SipMessageSender {
     public void processDialogTerminated(DialogTerminatedEvent dialogTerminatedEvent) {
     }
 
-    @Override
-    protected String proxyHost() {
-        return String.format("%s:%d;transport=%s", sipServerConfiguration.getAddress(), sipServerConfiguration.getPort(), sipServerConfiguration.getTransport().getTransportName());
+    private void processByeRequest(Dialog dialog) {
+        try {
+            // Create an ACK request as per the dialog
+            Request ackRequest = dialog.createAck(1);  // Sequence number is 1
+            dialog.sendAck(ackRequest);  // Send the ACK message
+
+            System.out.println("ACK sent for BYE request.");
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
-    @Override
-    protected String clientHost() {
-        return String.format("%s:%d", sipClientConfiguration.getAddress(), sipClientConfiguration.getPort());
+    private void processInviteAccepted(ResponseEvent responseEvent, Response response) {
+        Dialog dialog = responseEvent.getDialog();
+
+        try {
+            Request ackRequest = dialog.createAck(((CSeqHeader) response.getHeader(CSeqHeader.NAME)).getSeqNumber());
+            ackRequest.setRequestURI(addressFactory.createSipURI(null, proxyHost()));
+            dialog.sendAck(ackRequest);
+
+            byte[] content = (byte[]) response.getContent();
+            String sdp = new String(content);
+            System.out.println("Received SDP:\n" + sdp);
+
+            // Extract IP and port from SDP
+            String rtpIp = extractConnectionAddress(sdp);
+            int rtpPort = extractMediaPort(sdp);
+
+            System.out.println("Sending RTP to: " + rtpIp + ":" + rtpPort);
+            startRtpStream(rtpIp, 8000);
+
+        } catch (Exception e) {
+            e.printStackTrace();
+        }
     }
 
     private void processOptionsRequest(ServerTransaction serverTransaction, Request request) {
@@ -112,5 +168,15 @@ public class SipMessageSenderTcp extends SipMessageSender {
         } catch (ParseException | SipException | InvalidArgumentException e) {
             throw new RuntimeException(e);
         }
+    }
+
+    @Override
+    protected String proxyHost() {
+        return String.format("%s:%d;transport=%s", sipServerConfiguration.getAddress(), sipServerConfiguration.getPort(), sipServerConfiguration.getTransport().getTransportName());
+    }
+
+    @Override
+    protected String clientHost() {
+        return String.format("%s:%d", sipClientConfiguration.getAddress(), sipClientConfiguration.getPort());
     }
 }

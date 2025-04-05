@@ -12,9 +12,8 @@ services:
       - "5060:5060/tcp"
       - "8080:8080/udp"
       - "8080:8080/tcp"
-    networks:
-      - asterisk_net
+    network_mode: host
 
 networks:
   asterisk_net:
-    driver: bridge
+    driver: host
